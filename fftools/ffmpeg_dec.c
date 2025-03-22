@@ -115,6 +115,13 @@ typedef struct DecThreadContext {
     AVPacket        *pkt;
 } DecThreadContext;
 
+typedef struct {
+    DecoderPriv *dp;
+    DecThreadContext *dt;
+    int ret;
+    int input_status;
+} IterDecoderContext;
+
 void dec_free(Decoder **pdec)
 {
     Decoder *dec = *pdec;
