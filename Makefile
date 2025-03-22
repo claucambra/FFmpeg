@@ -43,6 +43,15 @@ include $(SRC_PATH)/tools/Makefile
 include $(SRC_PATH)/ffbuild/common.mak
 
 FF_EXTRALIBS := $(FFEXTRALIBS)
+
+FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-minimisation-c-bindings.a
+FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-minimisation.a
+FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-modelling.a
+FF_EXTRALIBS += /usr/local/lib/libsubstation-common.a
+FF_EXTRALIBS += /opt/homebrew/lib/libspdlog.a
+FF_EXTRALIBS += /opt/homebrew/lib/libfmt.a
+FF_EXTRALIBS += -lc++  # add the C++ standard library
+
 FF_DEP_LIBS  := $(DEP_LIBS)
 FF_STATIC_DEP_LIBS := $(STATIC_DEP_LIBS)
 
