@@ -17,6 +17,10 @@
  */
 
 #include <stdbit.h>
+#include <unistd.h>
+
+#include <substation/carbon-minimisation/bindings/c/iteratingtaskdescriptor.h>
+#include <substation/carbon-minimisation/bindings/c/taskmonitor.h>
 
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
@@ -1009,10 +1013,23 @@ static int decoder_thread(void *arg)
         .ret = 0,
         .input_status = 0
     };
+    const iter_task_desc_t task_desc = {
+        .throttle_desc = {
+            .has_max_cpu_limit = true,
+            .max_cpu_limit_percent = 100,
+            .has_min_cpu_limit = true,
+            .min_cpu_limit_percent = 20
+        },
+        .task_iter = &decoder_thread_iter,
+        .task_iter_ctx = &iter_ctx
+    };
+    task_monitor_handle_t *const monitor = task_monitor_create(&task_desc);
 
-    while (!iter_ctx.input_status) {
-        decoder_thread_iter(&iter_ctx);
-    }
+    task_monitor_start(monitor);
+    sleep(1);
+    while (task_monitor_is_running(monitor)) {}
+    task_monitor_destroy(monitor);
+
     ret = iter_ctx.ret;
 
     // EOF is normal thread termination
