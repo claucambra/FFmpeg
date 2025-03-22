@@ -916,80 +916,104 @@ fail:
     return AVERROR(ENOMEM);
 }
 
+static int64_t decoder_thread_iter(void *const ctx)
+{
+    static int64_t iter = 0;
+
+    IterDecoderContext *const iter_ctx = (IterDecoderContext *)ctx;
+    DecoderPriv *const dp = iter_ctx->dp;
+    DecThreadContext *const dt = iter_ctx->dt;
+    
+    iter_ctx->input_status = sch_dec_receive(dp->sch, dp->sch_idx, dt->pkt);
+
+    int have_data = iter_ctx->input_status >= 0 &&
+        (dt->pkt->buf || dt->pkt->side_data_elems ||
+            (intptr_t)dt->pkt->opaque == PKT_OPAQUE_SUB_HEARTBEAT ||
+            (intptr_t)dt->pkt->opaque == PKT_OPAQUE_FIX_SUB_DURATION);
+    int flush_buffers = iter_ctx->input_status >= 0 && !have_data;
+    
+    if (!have_data)
+        av_log(dp, AV_LOG_VERBOSE, "Decoder thread received %s packet\n",
+                flush_buffers ? "flush" : "EOF");
+
+    // this is a standalone decoder that has not been initialized yet
+    if (!dp->dec_ctx) {
+        if (flush_buffers)
+            return iter;
+        if (iter_ctx->input_status < 0) {
+            av_log(dp, AV_LOG_ERROR,
+                    "Cannot initialize a standalone decoder\n");
+            iter_ctx->ret = iter_ctx->input_status;
+            return -1;
+        }
+
+        iter_ctx->ret = dec_standalone_open(dp, dt->pkt);
+        if (iter_ctx->ret < 0) {
+            av_log(dp, AV_LOG_VERBOSE, "weee");
+            return -1;
+        }
+    }
+
+    iter_ctx->ret = packet_decode(dp, have_data ? dt->pkt : NULL, dt->frame);
+
+    av_packet_unref(dt->pkt);
+    av_frame_unref(dt->frame);
+
+    // AVERROR_EOF  - EOF from the decoder
+    // AVERROR_EXIT - EOF from the scheduler
+    // we treat them differently when flushing
+    if (iter_ctx->ret == AVERROR_EXIT) {
+        iter_ctx->ret = AVERROR_EOF;
+        flush_buffers = 0;
+    }
+
+    if (iter_ctx->ret == AVERROR_EOF) {
+        av_log(dp, AV_LOG_VERBOSE, "Decoder returned EOF, %s\n",
+                flush_buffers ? "resetting" : "finishing");
+
+        if (!flush_buffers) {
+            av_log(dp, AV_LOG_VERBOSE, "No flush needed\n");
+            return -1;
+        }
+
+        /* report last frame duration to the scheduler */
+        if (dp->dec_ctx->codec_type == AVMEDIA_TYPE_AUDIO) {
+            dt->pkt->pts       = dp->last_frame_pts + dp->last_frame_duration_est;
+            dt->pkt->time_base = dp->last_frame_tb;
+        }
+
+        avcodec_flush_buffers(dp->dec_ctx);
+    } else if (iter_ctx->ret < 0) {
+        av_log(dp, AV_LOG_ERROR, "Error processing packet in decoder: %s\n",
+                av_err2str(iter_ctx->ret));
+        return -1;
+    }
+    return iter++;
+}
+
 static int decoder_thread(void *arg)
 {
-    DecoderPriv  *dp = arg;
+    int ret = 0;
+    DecoderPriv *dp = arg;
     DecThreadContext dt;
-    int ret = 0, input_status = 0;
 
-    ret = dec_thread_init(&dt);
-    if (ret < 0)
+    if (dec_thread_init(&dt) < 0)
         goto finish;
 
     dec_thread_set_name(dp);
 
-    while (!input_status) {
-        int flush_buffers, have_data;
+    // Substation-related init
+    IterDecoderContext iter_ctx = {
+        .dp = dp,
+        .dt = &dt,
+        .ret = 0,
+        .input_status = 0
+    };
 
-        input_status  = sch_dec_receive(dp->sch, dp->sch_idx, dt.pkt);
-        have_data     = input_status >= 0 &&
-            (dt.pkt->buf || dt.pkt->side_data_elems ||
-             (intptr_t)dt.pkt->opaque == PKT_OPAQUE_SUB_HEARTBEAT ||
-             (intptr_t)dt.pkt->opaque == PKT_OPAQUE_FIX_SUB_DURATION);
-        flush_buffers = input_status >= 0 && !have_data;
-        if (!have_data)
-            av_log(dp, AV_LOG_VERBOSE, "Decoder thread received %s packet\n",
-                   flush_buffers ? "flush" : "EOF");
-
-        // this is a standalone decoder that has not been initialized yet
-        if (!dp->dec_ctx) {
-            if (flush_buffers)
-                continue;
-            if (input_status < 0) {
-                av_log(dp, AV_LOG_ERROR,
-                       "Cannot initialize a standalone decoder\n");
-                ret = input_status;
-                goto finish;
-            }
-
-            ret = dec_standalone_open(dp, dt.pkt);
-            if (ret < 0)
-                goto finish;
-        }
-
-        ret = packet_decode(dp, have_data ? dt.pkt : NULL, dt.frame);
-
-        av_packet_unref(dt.pkt);
-        av_frame_unref(dt.frame);
-
-        // AVERROR_EOF  - EOF from the decoder
-        // AVERROR_EXIT - EOF from the scheduler
-        // we treat them differently when flushing
-        if (ret == AVERROR_EXIT) {
-            ret = AVERROR_EOF;
-            flush_buffers = 0;
-        }
-
-        if (ret == AVERROR_EOF) {
-            av_log(dp, AV_LOG_VERBOSE, "Decoder returned EOF, %s\n",
-                   flush_buffers ? "resetting" : "finishing");
-
-            if (!flush_buffers)
-                break;
-
-            /* report last frame duration to the scheduler */
-            if (dp->dec_ctx->codec_type == AVMEDIA_TYPE_AUDIO) {
-                dt.pkt->pts       = dp->last_frame_pts + dp->last_frame_duration_est;
-                dt.pkt->time_base = dp->last_frame_tb;
-            }
-
-            avcodec_flush_buffers(dp->dec_ctx);
-        } else if (ret < 0) {
-            av_log(dp, AV_LOG_ERROR, "Error processing packet in decoder: %s\n",
-                   av_err2str(ret));
-            break;
-        }
+    while (!iter_ctx.input_status) {
+        decoder_thread_iter(&iter_ctx);
     }
+    ret = iter_ctx.ret;
 
     // EOF is normal thread termination
     if (ret == AVERROR_EOF)
