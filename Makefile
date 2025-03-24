@@ -46,8 +46,11 @@ FF_EXTRALIBS := $(FFEXTRALIBS)
 
 FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-minimisation-c-bindings.a
 FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-minimisation.a
+FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-modelling-c-bindings.a
 FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-modelling.a
 FF_EXTRALIBS += /usr/local/lib/libsubstation-common.a
+FF_EXTRALIBS += /usr/local/lib/libsubstation-benchmarking-c-bindings.a
+FF_EXTRALIBS += /usr/local/lib/libsubstation-benchmarking.a
 FF_EXTRALIBS += /opt/homebrew/lib/libspdlog.a
 FF_EXTRALIBS += /opt/homebrew/lib/libfmt.a
 FF_EXTRALIBS += -lc++  # add the C++ standard library
@@ -139,13 +142,7 @@ include $(SRC_PATH)/doc/examples/Makefile
 $(ALLFFLIBS:%=lib%/version.o): libavutil/ffversion.h
 
 $(PROGS): %$(PROGSSUF)$(EXESUF): %$(PROGSSUF)_g$(EXESUF)
-ifeq ($(STRIPTYPE),direct)
-	$(STRIP) -o $@ $<
-else
-	$(RM) $@
 	$(CP) $< $@
-	$(STRIP) $@
-endif
 
 %$(PROGSSUF)_g$(EXESUF): $(FF_DEP_LIBS)
 	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(OBJS-$*) $(FF_EXTRALIBS)

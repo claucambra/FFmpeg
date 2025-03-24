@@ -19,6 +19,9 @@
 #include <stdbit.h>
 #include <unistd.h>
 
+#include <substation/benchmarking/bindings/c/syntheticdatautils.h>
+#include <substation/carbon-modelling/bindings/c/carbonintensity.h>
+#include <substation/carbon-modelling/bindings/c/carbonintensitycurve.h>
 #include <substation/carbon-minimisation/bindings/c/iteratingtaskdescriptor.h>
 #include <substation/carbon-minimisation/bindings/c/taskmonitor.h>
 
@@ -1006,13 +1009,22 @@ static int decoder_thread(void *arg)
 
     dec_thread_set_name(dp);
 
-    // Substation-related init
+    // Substation-related initialization
+    // TODO: Make these command line arguments
+    // START OF SUBSTATION PARAMETERS
+    const size_t ss_data_interval = 60;
+    const char *const ss_data_path = NULL;
+    const bool ss_project_past_data = true;
+    const bool ss_schedule_later = false;
+    // END OF SUBSTATION PARAMETERS
+
     IterDecoderContext iter_ctx = {
         .dp = dp,
         .dt = &dt,
         .ret = 0,
         .input_status = 0
     };
+
     const iter_task_desc_t task_desc = {
         .throttle_desc = {
             .has_max_cpu_limit = true,
@@ -1023,11 +1035,30 @@ static int decoder_thread(void *arg)
         .task_iter = &decoder_thread_iter,
         .task_iter_ctx = &iter_ctx
     };
-    task_monitor_handle_t *const monitor = task_monitor_create(&task_desc);
+    task_monitor_handle_t *const monitor = task_monitor_create(&task_desc, NULL);
+
+    // Check store path exists in filesystem
+    if (ss_data_path && avio_check(ss_data_path, AVIO_FLAG_READ)) {
+        carbon_intensity_curve_handle_t *const curve = task_monitor_curve(monitor);
+        carbon_intensity_array_t *const intensities = carbon_intensity_load(ss_data_path);
+        verify_synthetic_data(intensities);
+        if (ss_project_past_data)
+            synthetic_data_shift_times(intensities, &ss_data_interval, DATA_START_POINT_NOW);
+
+        av_log(dp, AV_LOG_INFO, "Synthetic data loaded with count of %zu\n", intensities->count);
+        av_log(dp, AV_LOG_INFO, "Data starting from %s\n", ctime(&intensities->data[0].datetime));
+    }
+
+    for (size_t i = 0; i < intensities->count; i++) {
+        carbon_intensity_curve_add(curve, &intensities->data[i]);
+    }
+    carbon_intensity_curve_print(curve);
+    carbon_intensity_array_destroy(intensities);
 
     task_monitor_start(monitor);
     sleep(1);
     while (task_monitor_is_running(monitor)) {}
+    av_log(dp, AV_LOG_INFO, "Final iteration count: %zu\n", task_monitor_get_completed_iters(monitor));
     task_monitor_destroy(monitor);
 
     ret = iter_ctx.ret;
