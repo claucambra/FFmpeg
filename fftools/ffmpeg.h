@@ -416,6 +416,8 @@ typedef struct DecoderOpts {
     // Either forced (when DECODER_FLAG_FRAMERATE_FORCED is set) or
     // estimated (otherwise) video framerate.
     AVRational                  framerate;
+
+    int64_t container_duration;
 } DecoderOpts;
 
 typedef struct Decoder {

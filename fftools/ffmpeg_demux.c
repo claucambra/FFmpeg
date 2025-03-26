@@ -1276,6 +1276,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
     ds->next_dts    = AV_NOPTS_VALUE;
 
     ds->dec_opts.time_base = st->time_base;
+    ds->dec_opts.container_duration = ic->duration / (double)AV_TIME_BASE;
 
     ds->ts_scale = 1.0;
     opt_match_per_stream_dbl(ist, &o->ts_scale, ic, st, &ds->ts_scale);

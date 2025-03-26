@@ -75,6 +75,9 @@ typedef struct DecoderPriv {
     int64_t             last_filter_in_rescale_delta;
     int                 last_frame_sample_rate;
 
+    // container duration
+    int64_t             container_duration;
+
     /* previous decoded subtitles */
     AVFrame            *sub_prev[2];
     AVFrame            *sub_heartbeat;
@@ -1748,6 +1751,7 @@ int dec_init(Decoder **pdec, Scheduler *sch,
         goto fail;
 
     *pdec = &dp->dec;
+    dp->container_duration = o->container_duration;
 
     return dp->sch_idx;
 fail:
