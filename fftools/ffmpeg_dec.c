@@ -130,6 +130,8 @@ typedef struct {
     DecThreadContext *dt;
     int ret;
     int input_status;
+    time_t start_time;
+    task_monitor_handle_t *monitor;
 } IterDecoderContext;
 
 void dec_free(Decoder **pdec)
@@ -1001,6 +1003,23 @@ static int64_t decoder_thread_iter(void *const ctx)
     return iter++;
 }
 
+static void decoder_ss_iter_completed(const size_t iter, void *const ctx)
+{
+    IterDecoderContext *const iter_ctx = (IterDecoderContext *)ctx;
+
+    const int now_secs = av_gettime() / 1000000;
+    const int elapsed_secs = now_secs - iter_ctx->start_time;
+
+    const double decoded_media_sec = av_q2d(iter_ctx->dp->last_frame_tb) * iter_ctx->dp->last_frame_pts;
+    const double measured_speed = decoded_media_sec / elapsed_secs;
+
+    const int remaining_container_secs = iter_ctx->dp->container_duration - decoded_media_sec;
+    const int remaining_decode_time = remaining_container_secs / measured_speed;
+
+    av_log(iter_ctx->dp, AV_LOG_DEBUG, "Estimated remaining decode time: %d seconds\n", remaining_decode_time);
+    task_monitor_set_remaining_time(iter_ctx->monitor, remaining_decode_time);
+}
+
 static int decoder_thread(void *arg)
 {
     int ret = 0;
@@ -1011,6 +1030,8 @@ static int decoder_thread(void *arg)
         goto finish;
 
     dec_thread_set_name(dp);
+
+    av_log(dp, AV_LOG_INFO, "Decoding container with duration of %d secs\n", dp->container_duration);
 
     // Substation-related initialization
     // TODO: Make these command line arguments
@@ -1025,7 +1046,8 @@ static int decoder_thread(void *arg)
         .dp = dp,
         .dt = &dt,
         .ret = 0,
-        .input_status = 0
+        .input_status = 0,
+        .start_time = av_gettime() / 1000000,
     };
 
     const iter_task_desc_t task_desc = {
@@ -1036,9 +1058,12 @@ static int decoder_thread(void *arg)
             .min_cpu_limit_percent = 20
         },
         .task_iter = &decoder_thread_iter,
-        .task_iter_ctx = &iter_ctx
+        .task_iter_ctx = &iter_ctx,
+        .iter_completed_cb = &decoder_ss_iter_completed,
+        .iter_completed_ctx = &iter_ctx,
     };
     task_monitor_handle_t *const monitor = task_monitor_create(&task_desc, NULL);
+    iter_ctx.monitor = monitor;
 
     // Check store path exists in filesystem
     if (ss_data_path && avio_check(ss_data_path, AVIO_FLAG_READ)) {
@@ -1050,13 +1075,13 @@ static int decoder_thread(void *arg)
 
         av_log(dp, AV_LOG_INFO, "Synthetic data loaded with count of %zu\n", intensities->count);
         av_log(dp, AV_LOG_INFO, "Data starting from %s\n", ctime(&intensities->data[0].datetime));
-    }
 
-    for (size_t i = 0; i < intensities->count; i++) {
-        carbon_intensity_curve_add(curve, &intensities->data[i]);
+        for (size_t i = 0; i < intensities->count; i++) {
+            carbon_intensity_curve_add(curve, &intensities->data[i]);
+        }
+        carbon_intensity_curve_print(curve);
+        carbon_intensity_array_destroy(intensities);
     }
-    carbon_intensity_curve_print(curve);
-    carbon_intensity_array_destroy(intensities);
 
     task_monitor_start(monitor);
     sleep(1);
