@@ -1039,7 +1039,7 @@ static int decoder_thread(void *arg)
 
     dec_thread_set_name(dp);
 
-    av_log(dp, AV_LOG_INFO, "Decoding container with duration of %d secs\n", dp->container_duration);
+    av_log(dp, AV_LOG_INFO, "Decoding container with duration of %lld secs\n", dp->container_duration);
 
     // Substation-related initialization
     // TODO: Make these command line arguments
