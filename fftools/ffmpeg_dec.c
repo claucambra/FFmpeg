@@ -1094,10 +1094,18 @@ static int decoder_thread(void *arg)
         carbon_intensity_array_destroy(intensities);
     }
 
+    // Substation
     task_monitor_start(monitor);
     sleep(1);
     while (task_monitor_is_running(monitor)) {}
-    av_log(dp, AV_LOG_INFO, "Final iteration count: %zu\n", task_monitor_get_completed_iters(monitor));
+    // Non-substation
+    /*
+    int iter = -1;
+    do {
+        iter = decoder_thread_iter(&iter_ctx);
+        decoder_ss_iter_completed(iter, &iter_ctx);
+    } while (iter >= 0);
+    */
     task_monitor_destroy(monitor);
 
     ret = iter_ctx.ret;
