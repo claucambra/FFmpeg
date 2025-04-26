@@ -1043,12 +1043,23 @@ static int decoder_thread(void *arg)
 
     // Substation-related initialization
     // TODO: Make these command line arguments
-    // START OF SUBSTATION PARAMETERS
-    const size_t ss_data_interval = 60;
-    const char *const ss_data_path = NULL;
-    const bool ss_project_past_data = true;
-    const bool ss_schedule_later = false;
-    // END OF SUBSTATION PARAMETERS
+    // START OF SUBSTATION PARAMETERS ------------------------------------------
+    const bool ss_enable = atoi(getenv("SUBSTATION_ENABLE"));
+
+    size_t ss_data_interval = atoi(getenv("SUBSTATION_SYNTHETIC_DATA_INTERVAL"));
+    if (ss_data_interval == 0)
+        ss_data_interval = 5;
+
+    uint8_t ss_max_cpu_limit = atoi(getenv("SUBSTATION_MAX_CPU_LIMIT"));
+    if (ss_max_cpu_limit == 0)
+        ss_max_cpu_limit = 100;
+    uint8_t ss_min_cpu_limit = atoi(getenv("SUBSTATION_MIN_CPU_LIMIT"));
+    if (ss_min_cpu_limit == 0)
+        ss_min_cpu_limit = 1;
+
+    const char *const ss_data_path = getenv("SUBSTATION_SYNTHETIC_DATA_PATH");
+    const bool ss_project_past_data = atoi(getenv("SUBSTATION_PROJECT_PAST_DATA"));
+    // END OF SUBSTATION PARAMETERS --------------------------------------------
 
     IterDecoderContext iter_ctx = {
         .dp = dp,
@@ -1062,9 +1073,9 @@ static int decoder_thread(void *arg)
     const iter_task_desc_t task_desc = {
         .throttle_desc = {
             .has_max_cpu_limit = true,
-            .max_cpu_limit_percent = 100,
+            .max_cpu_limit_percent = ss_max_cpu_limit,
             .has_min_cpu_limit = true,
-            .min_cpu_limit_percent = 20
+            .min_cpu_limit_percent = ss_min_cpu_limit
         },
         .task_iter = &decoder_thread_iter,
         .task_iter_ctx = &iter_ctx,
@@ -1081,11 +1092,12 @@ static int decoder_thread(void *arg)
         carbon_intensity_curve_handle_t *const curve = task_monitor_curve(monitor);
         carbon_intensity_array_t *const intensities = carbon_intensity_load(ss_data_path);
         verify_synthetic_data(intensities);
-        if (ss_project_past_data)
-            synthetic_data_shift_times(intensities, &ss_data_interval, DATA_START_POINT_NOW);
+        if (ss_project_past_data) {
+            // CHANGE BELOW TO DO SCHEDULING/NON SCHEDULING TESTS
+            synthetic_data_shift_times(intensities, &ss_data_interval, DATA_START_POINT_MIN_INTENSITY);
+        }
 
         av_log(dp, AV_LOG_INFO, "Synthetic data loaded with count of %zu\n", intensities->count);
-        av_log(dp, AV_LOG_INFO, "Data starting from %s\n", ctime(&intensities->data[0].datetime));
 
         for (size_t i = 0; i < intensities->count; i++) {
             carbon_intensity_curve_add(curve, &intensities->data[i]);
@@ -1095,17 +1107,17 @@ static int decoder_thread(void *arg)
     }
 
     // Substation
-    task_monitor_start(monitor);
-    sleep(1);
-    while (task_monitor_is_running(monitor)) {}
-    // Non-substation
-    /*
-    int iter = -1;
-    do {
-        iter = decoder_thread_iter(&iter_ctx);
-        decoder_ss_iter_completed(iter, &iter_ctx);
-    } while (iter >= 0);
-    */
+    if (ss_enable) {
+        task_monitor_start(monitor);
+        sleep(1);
+        while (task_monitor_is_running(monitor)) {}
+    } else { // Non-substation
+        int iter = -1;
+        do {
+            iter = decoder_thread_iter(&iter_ctx);
+            decoder_ss_iter_completed(iter, &iter_ctx);
+        } while (iter >= 0);
+    }
     task_monitor_destroy(monitor);
 
     ret = iter_ctx.ret;
