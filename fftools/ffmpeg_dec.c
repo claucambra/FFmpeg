@@ -1098,6 +1098,14 @@ static int decoder_thread(void *arg)
             ss_data_interval = ss_data_interval_atoi;
     }
 
+    const char *const ss_data_count_limit_str = getenv("SUBSTATION_SYNTHETIC_DATA_COUNT_LIMIT");
+    size_t ss_data_count_limit = 97;
+    if (ss_data_count_limit_str) {
+        const size_t ss_data_count_limit_atoi = atoi(ss_data_count_limit_str);
+        if (ss_data_count_limit_atoi > 0)
+            ss_data_count_limit = ss_data_count_limit_atoi;
+    }
+
     const char *const ss_max_cpu_limit_str = getenv("SUBSTATION_MAX_CPU_LIMIT");
     uint8_t ss_max_cpu_limit = 100;
     if (ss_max_cpu_limit_str) {
@@ -1169,7 +1177,7 @@ static int decoder_thread(void *arg)
         verify_synthetic_data(intensities);
         if (ss_project_past_data) {
             // CHANGE BELOW TO DO SCHEDULING/NON SCHEDULING TESTS
-            synthetic_data_shift_times(intensities, &ss_data_interval, DATA_START_POINT_MIN_INTENSITY);
+            synthetic_data_shift_times(intensities, &ss_data_interval, &ss_data_count_limit, DATA_START_POINT_MIN_INTENSITY);
         }
 
         av_log(dp, AV_LOG_INFO, "Synthetic data loaded with count of %zu\n", intensities->count);
