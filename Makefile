@@ -51,9 +51,12 @@ FF_EXTRALIBS += /usr/local/lib/libsubstation-carbon-modelling.a
 FF_EXTRALIBS += /usr/local/lib/libsubstation-common.a
 FF_EXTRALIBS += /usr/local/lib/libsubstation-benchmarking-c-bindings.a
 FF_EXTRALIBS += /usr/local/lib/libsubstation-benchmarking.a
+FF_EXTRALIBS += /usr/local/lib/libsubstation-power-monitoring.a
 FF_EXTRALIBS += /opt/homebrew/lib/libspdlog.a
 FF_EXTRALIBS += /opt/homebrew/lib/libfmt.a
 FF_EXTRALIBS += -lc++  # add the C++ standard library
+# Add macOS frameworks required by Substation power monitoring
+FF_EXTRALIBS += -framework IOKit -framework CoreFoundation
 
 FF_DEP_LIBS  := $(DEP_LIBS)
 FF_STATIC_DEP_LIBS := $(STATIC_DEP_LIBS)
