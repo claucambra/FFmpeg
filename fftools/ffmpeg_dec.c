@@ -17,8 +17,13 @@
  */
 
 #include <stdbit.h>
+#include <stdint.h>
+#include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
+#include <substation/benchmarking/bindings/c/benchmarkutils.h>
 #include <substation/benchmarking/bindings/c/syntheticdatautils.h>
 #include <substation/carbon-modelling/bindings/c/carbonintensity.h>
 #include <substation/carbon-modelling/bindings/c/carbonintensitycurve.h>
@@ -132,6 +137,7 @@ typedef struct {
     int input_status;
     time_t start_time;
     float current_cpu_limit;
+    const char *const results_path;
     task_monitor_handle_t *monitor;
 } IterDecoderContext;
 
@@ -887,19 +893,50 @@ static int dec_standalone_open(DecoderPriv *dp, const AVPacket *pkt)
     return dec_open(dp, &dp->standalone_init.opts, &o, NULL);
 }
 
+static const char *dec_get_name(const DecoderPriv *dp) // Return type is now char* (non-const)
+{
+    const size_t buffer_size = 64; // Let's use a larger buffer than 16
+    char *name = av_malloc(buffer_size);
+    if (!name)
+        return NULL;
+
+    name[0] = '\0';
+
+    if (dp->index >= 0) {
+        av_strlcatf(name, buffer_size, "%d", dp->index);
+    } else if (dp->parent_name) {
+        av_strlcat(name, dp->parent_name, buffer_size);
+    }
+
+    if (dp->dec_ctx && dp->dec_ctx->codec && dp->dec_ctx->codec->name) {
+        // Check if something was already added OR if index was exactly 0
+        if (name[0] != '\0' || (dp->index == 0)) { // Check remaining space before adding separator and name
+            const size_t current_len = strlen(name);
+            if (current_len + strlen(dp->dec_ctx->codec->name) + 2 < buffer_size) { // +2 for ':' and '\0'
+                av_strlcat(name, ":", buffer_size);
+                av_strlcat(name, dp->dec_ctx->codec->name, buffer_size);
+            } else { // Not enough space for full codec name, av_strlcatf/av_strlcat will truncate below
+                av_strlcatf(name, buffer_size, ":%s", dp->dec_ctx->codec->name);
+            }
+        } else { // Buffer was empty, just copy codec name
+            av_strlcat(name, dp->dec_ctx->codec->name, buffer_size);
+        }
+    } else if (name[0] == '\0') {
+         av_strlcpy(name, "?", buffer_size);
+    }
+
+    // Optional: Resize buffer down to the actual used size to save memory.
+    const size_t final_len = strlen(name);
+    char *const final_name = av_realloc(name, final_len + 1);
+    if (final_name) {
+        return final_name;
+    }
+    return name; // Caller MUST call av_free() on this pointer later!
+}
+
 static void dec_thread_set_name(const DecoderPriv *dp)
 {
-    char name[16] = "dec";
-
-    if (dp->index >= 0)
-        av_strlcatf(name, sizeof(name), "%d", dp->index);
-    else if (dp->parent_name)
-        av_strlcat(name, dp->parent_name, sizeof(name));
-
-    if (dp->dec_ctx)
-        av_strlcatf(name, sizeof(name), ":%s", dp->dec_ctx->codec->name);
-
-    ff_thread_setname(name);
+    ff_thread_setname(dec_get_name(dp));
 }
 
 static void dec_thread_uninit(DecThreadContext *dt)
@@ -1025,7 +1062,14 @@ static void decoder_ss_iter_completed(const size_t iter, void *const ctx)
     const int remaining_decode_time = remaining_container_secs / measured_speed;
 
     av_log(iter_ctx->dp, AV_LOG_DEBUG, "Estimated remaining decode time: %d seconds\n", remaining_decode_time);
-    task_monitor_set_remaining_time(iter_ctx->monitor, remaining_decode_time);
+    // Either set end time to remaining decode time or last curve time, whichever comes first
+    const int time_to_curve_final = iter_ctx->final_intensity_time - now_secs;
+    const int end_time = remaining_decode_time < time_to_curve_final ?
+                         remaining_decode_time : time_to_curve_final;
+    task_monitor_set_remaining_time(iter_ctx->monitor, end_time);
+
+    if (iter_ctx->results_path)
+        substation_store_result_intensity_to_file(iter_ctx->results_path, task_monitor_curve(iter_ctx->monitor), iter, iter_ctx->current_cpu_limit);
 }
 
 static int decoder_thread(void *arg)
@@ -1072,6 +1116,23 @@ static int decoder_thread(void *arg)
     const char *const ss_data_path = getenv("SUBSTATION_SYNTHETIC_DATA_PATH");
     const char *const ss_project_past_data_str = getenv("SUBSTATION_PROJECT_PAST_DATA");
     const bool ss_project_past_data = ss_project_past_data_str != NULL && atoi(ss_project_past_data_str);
+
+    const char *ss_base_results_path = getenv("SUBSTATION_BENCHMARK_RESULTS_PATH");
+    char ss_results_path[256];
+    ss_results_path[0] = '\0';
+    if (ss_base_results_path) {
+        snprintf(ss_results_path, sizeof(ss_results_path), "%s_%s", ss_base_results_path, dec_get_name(dp));
+        // Create results path if it doesn't exist
+
+        struct stat st_results = {0};
+        if (stat(ss_results_path, &st_results) == -1) {
+            if (mkdir(ss_results_path, 0755) != 0) {
+                av_log(dp, AV_LOG_ERROR, "Failed to create results path: %s\n", ss_results_path);
+            } else {
+                av_log(dp, AV_LOG_INFO, "Results path created: %s\n", ss_results_path);
+            }
+        }
+    }
     // END OF SUBSTATION PARAMETERS --------------------------------------------
 
     IterDecoderContext iter_ctx = {
@@ -1081,6 +1142,7 @@ static int decoder_thread(void *arg)
         .input_status = 0,
         .start_time = av_gettime() / 1000000,
         .current_cpu_limit = 100,
+        .results_path = ss_results_path[0] == '\0' ? NULL : ss_results_path
     };
 
     const iter_task_desc_t task_desc = {
