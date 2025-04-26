@@ -1046,19 +1046,32 @@ static int decoder_thread(void *arg)
     // START OF SUBSTATION PARAMETERS ------------------------------------------
     const bool ss_enable = atoi(getenv("SUBSTATION_ENABLE"));
 
-    size_t ss_data_interval = atoi(getenv("SUBSTATION_SYNTHETIC_DATA_INTERVAL"));
-    if (ss_data_interval == 0)
-        ss_data_interval = 5;
+    const char *const ss_data_interval_str = getenv("SUBSTATION_SYNTHETIC_DATA_INTERVAL");
+    size_t ss_data_interval = 5;
+    if (ss_data_interval_str) {
+        const size_t ss_data_interval_atoi = atoi(ss_data_interval_str);
+        if (ss_data_interval_atoi > 0)
+            ss_data_interval = ss_data_interval_atoi;
+    }
 
-    uint8_t ss_max_cpu_limit = atoi(getenv("SUBSTATION_MAX_CPU_LIMIT"));
-    if (ss_max_cpu_limit == 0)
-        ss_max_cpu_limit = 100;
-    uint8_t ss_min_cpu_limit = atoi(getenv("SUBSTATION_MIN_CPU_LIMIT"));
-    if (ss_min_cpu_limit == 0)
-        ss_min_cpu_limit = 1;
+    const char *const ss_max_cpu_limit_str = getenv("SUBSTATION_MAX_CPU_LIMIT");
+    uint8_t ss_max_cpu_limit = 100;
+    if (ss_max_cpu_limit_str) {
+        const uint8_t ss_max_cpu_limit_atoi = atoi(ss_max_cpu_limit_str);
+        if (ss_max_cpu_limit_atoi > 0)
+            ss_max_cpu_limit = ss_max_cpu_limit_atoi;
+    }
+    const char *const ss_min_cpu_limit_str = getenv("SUBSTATION_MIN_CPU_LIMIT");
+    uint8_t ss_min_cpu_limit = 1;
+    if (ss_min_cpu_limit_str) {
+        const uint8_t ss_min_cpu_limit_atoi = atoi(ss_min_cpu_limit_str);
+        if (ss_min_cpu_limit_atoi > 0)
+            ss_min_cpu_limit = ss_min_cpu_limit_atoi;
+    }
 
     const char *const ss_data_path = getenv("SUBSTATION_SYNTHETIC_DATA_PATH");
-    const bool ss_project_past_data = atoi(getenv("SUBSTATION_PROJECT_PAST_DATA"));
+    const char *const ss_project_past_data_str = getenv("SUBSTATION_PROJECT_PAST_DATA");
+    const bool ss_project_past_data = ss_project_past_data_str != NULL && atoi(ss_project_past_data_str);
     // END OF SUBSTATION PARAMETERS --------------------------------------------
 
     IterDecoderContext iter_ctx = {
@@ -1108,10 +1121,12 @@ static int decoder_thread(void *arg)
 
     // Substation
     if (ss_enable) {
+        av_log(dp, AV_LOG_INFO, "Running with substation\n");
         task_monitor_start(monitor);
         sleep(1);
         while (task_monitor_is_running(monitor)) {}
     } else { // Non-substation
+        av_log(dp, AV_LOG_INFO, "Running without substation\n");
         int iter = -1;
         do {
             iter = decoder_thread_iter(&iter_ctx);
