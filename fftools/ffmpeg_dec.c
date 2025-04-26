@@ -131,6 +131,7 @@ typedef struct {
     int ret;
     int input_status;
     time_t start_time;
+    float current_cpu_limit;
     task_monitor_handle_t *monitor;
 } IterDecoderContext;
 
@@ -1003,6 +1004,13 @@ static int64_t decoder_thread_iter(void *const ctx)
     return iter++;
 }
 
+static void decoder_ss_cpu_limit_applied(const float limit, void *const ctx)
+{
+    IterDecoderContext *const iter_ctx = (IterDecoderContext *)ctx;
+    av_log(iter_ctx->dp, AV_LOG_INFO, "Decoder CPU limit: %f\n", limit);
+    iter_ctx->current_cpu_limit = limit;
+}
+
 static void decoder_ss_iter_completed(const size_t iter, void *const ctx)
 {
     IterDecoderContext *const iter_ctx = (IterDecoderContext *)ctx;
@@ -1048,6 +1056,7 @@ static int decoder_thread(void *arg)
         .ret = 0,
         .input_status = 0,
         .start_time = av_gettime() / 1000000,
+        .current_cpu_limit = 100,
     };
 
     const iter_task_desc_t task_desc = {
@@ -1059,6 +1068,8 @@ static int decoder_thread(void *arg)
         },
         .task_iter = &decoder_thread_iter,
         .task_iter_ctx = &iter_ctx,
+        .cpu_limit_cb = &decoder_ss_cpu_limit_applied,
+        .cpu_limit_ctx = &iter_ctx,
         .iter_completed_cb = &decoder_ss_iter_completed,
         .iter_completed_ctx = &iter_ctx,
     };
